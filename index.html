@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مسرح راشي - Light Team</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <style>
+        .seat-btn {
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            font-size: 8px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #475569;
+            transition: all 0.1s ease;
+            flex-shrink: 0;
+        }
+        .seat-available { background-color: #1e293b; color: #fff; }
+        .seat-booked { background-color: #059669; border-color: #34d399; color: #fff; }
+        .seat-sold { background-color: #dc2626; border-color: #f87171; color: #fff; }
+    </style>
+</head>
+<body class="bg-slate-950 text-white font-sans overflow-x-hidden">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const firebaseConfig = {
+            apiKey: "AIzaSyCkpEibCvqlv6BAqlPYERBlvzL11xAa02w",
+            authDomain: "rashi-theater.firebaseapp.com",
+            databaseURL: "https://rashi-theater-default-rtdb.firebaseio.com",
+            projectId: "rashi-theater",
+            storageBucket: "rashi-theater.firebasestorage.app",
+            messagingSenderId: "667889838688",
+            appId: "1:667889838688:web:9ae35a8150387dc8de7105",
+            measurementId: "G-HCQ3E4G5BE"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.database();
+
+        function App() {
+            const [currentUser, setCurrentUser] = React.useState(null);
+            const [activeTab, setActiveTab] = React.useState('seats');
+            const [activeShowId, setActiveShowId] = React.useState(1);
+
+            const [shows, setShowList] = React.useState([{ id: 1, name: 'حفلة الافتتاح الكبرى', date: '2026-11-15', price: 50 }]);
+            const [users, setUsers] = React.useState([
+                { username: 'developer', name: 'المطور الرئيسي', pass: '123456', role: 'developer', permissions: { seats: true, reports: true, finances: true, users: true, shows: true } }
+            ]);
+            const [seatsData, setSeatsData] = React.useState({});
+            const [payments, setPayments] = React.useState({});
+
+            const [loginUser, setLoginUser] = React.useState('');
+            const [loginPass, setLoginPass] = React.useState('');
+            
+            const [myUsername, setMyUsername] = React.useState('');
+            const [myPass, setMyPass] = React.useState('');
+
+            const [newUsername, setNewUsername] = React.useState('');
+            const [newName, setNewName] = React.useState('');
+            const [newPass, setNewPass] = React.useState('');
+            const [newRole, setNewRole] = React.useState('user');
+            const [newPerms, setNewPerms] = React.useState({ seats: true, reports: true, finances: false, users: false, shows: false });
+            const [editingUser, setEditingUser] = React.useState(null);
+
+            const [newShowName, setNewShowName] = React.useState('');
+            const [newShowDate, setNewShowDate] = React.useState('');
+            const [newShowPrice, setNewShowPrice] = React.useState(50);
+
+            React.useEffect(() => {
+                db.ref('shows').on('value', s => s.exists() && setShowList(s.val()));
+                db.ref('users').on('value', s => {
+                    if (s.exists()) {
+                        let val = s.val();
+                        // ضمان أن المطور الرئيسي دائمًا دورة developer ولا يتغير أبداً
+                        val = val.map(u => u.username === 'developer' ? { ...u, role: 'developer' } : u);
+                        setUsers(val);
+                    }
+                });
+                db.ref('seatsData').on('value', s => s.exists() && setSeatsData(s.val()));
+                db.ref('payments').on('value', s => s.exists() && setPayments(s.val()));
+            }, []);
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const found = users.find(u => u.username === loginUser && u.pass === loginPass);
+                if (found) {
+                    setCurrentUser(found);
+                    setMyUsername(found.username);
+                    setMyPass(found.pass);
+                } else {
+                    alert('اسم المستخدم أو كلمة المرور غير صحيحة!');
+                }
+            };
+
+            const handleSeatClick = (seatNumber) => {
+                if (!currentUser || !currentUser.permissions.seats) return;
+                const currentShowSeats = seatsData[activeShowId] || {};
+                const currentSeat = currentShowSeats[seatNumber];
+                const isAdminOrDev = currentUser.role === 'developer' || currentUser.role === 'admin';
+
+                const updatedShowSeats = { ...currentShowSeats };
+
+                if (!currentSeat) {
+                    updatedShowSeats[seatNumber] = {
+                        status: 'booked',
+                        seller: currentUser.name,
+                        username: currentUser.username,
+                        time: new Date().toLocaleTimeString('ar-EG')
+                    };
+                } else if (currentSeat.status === 'booked') {
+                    if (currentSeat.username === currentUser.username || isAdminOrDev) {
+                        updatedShowSeats[seatNumber] = {
+                            status: 'sold',
+                            seller: currentUser.name,
+                            username: currentUser.username,
+                            time: new Date().toLocaleTimeString('ar-EG')
+                        };
+                    } else {
+                        alert('عفواً، هذا المقعد محجوز بواسطة بائع آخر!');
+                        return;
+                    }
+                } else if (currentSeat.status === 'sold') {
+                    if (currentSeat.username === currentUser.username || isAdminOrDev) {
+                        delete updatedShowSeats[seatNumber];
+                    } else {
+                        alert('عفواً، هذا المقعد مبيوع بواسطة بائع آخر ولا يمكنك التعديل عليه!');
+                        return;
+                    }
+                }
+
+                db.ref(`seatsData/${activeShowId}`).set(updatedShowSeats);
+            };
+
+            const renderSeat = (i) => {
+                const seatInfo = (seatsData[activeShowId] || {})[i];
+                let statusClass = 'seat-available';
+                if (seatInfo?.status === 'booked') statusClass = 'seat-booked';
+                if (seatInfo?.status === 'sold') statusClass = 'seat-sold';
+
+                return (
+                    <button
+                        key={i}
+                        onClick={() => handleSeatClick(i)}
+                        className={`seat-btn ${statusClass}`}
+                        title={`كرسي ${i} - ${seatInfo ? seatInfo.seller : 'متاح'}`}
+                    >
+                        {i}
+                    </button>
+                );
+            };
+
+            const renderRow = (numbers) => (
+                <div className="flex justify-center gap-1 my-1">
+                    {numbers.map(n => renderSeat(n))}
+                </div>
+            );
+
+            const range = (s, e) => Array.from({ length: e - s + 1 }, (_, idx) => s + idx);
+
+            const startEditUser = (u) => {
+                if (u.username === 'developer') return alert('لا يمكن تعديل حساب المطور الرئيسي!');
+                setEditingUser(u.username);
+                setNewUsername(u.username);
+                setNewName(u.name);
+                setNewPass(u.pass);
+                setNewRole(u.role);
+                setNewPerms(u.permissions || { seats: true, reports: true, finances: false, users: false, shows: false });
+            };
+
+            const saveEditedUser = () => {
+                const updated = users.map(u => u.username === editingUser ? {
+                    ...u,
+                    name: newName,
+                    pass: newPass,
+                    role: newRole,
+                    permissions: newPerms
+                } : u);
+                db.ref('users').set(updated);
+                setEditingUser(null);
+                setNewUsername(''); setNewName(''); setNewPass('');
+                alert('تم تعديل بيانات الحساب بنجاح!');
+            };
+
+            return (
+                <div class="min-h-screen p-2 sm:p-4 bg-slate-950 text-white">
+                    {!currentUser ? (
+                        <div class="max-w-sm mx-auto mt-16 bg-slate-900 p-6 rounded-2xl shadow-2xl border border-slate-800">
+                            <h2 class="text-xl font-bold text-center mb-6 text-emerald-400">مسرح راشي - تسجيل الدخول</h2>
+                            <form onSubmit={handleLogin} class="space-y-4">
+                                <div>
+                                    <label class="block text-xs mb-1 text-slate-300">اسم المستخدم</label>
+                                    <input type="text" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} class="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs" required />
+                                </div>
+                                <div>
+                                    <label class="block text-xs mb-1 text-slate-300">كلمة المرور</label>
+                                    <input type="password" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} class="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs" required />
+                                </div>
+                                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white p-2.5 rounded-xl font-bold text-xs">دخول للنظام</button>
+                            </form>
+                        </div>
+                    ) : (
+                        <div class="max-w-6xl mx-auto space-y-3">
+                            <div class="bg-slate-900 p-3 rounded-2xl flex flex-wrap justify-between items-center border border-slate-800 gap-2">
+                                <div>
+                                    <h1 class="text-base font-bold text-emerald-400">مسرح راشي (Light Team)</h1>
+                                    <p class="text-[10px] text-slate-400">مرحباً، {currentUser.name} {currentUser.role === 'developer' ? '(المطور الرئيسي)' : currentUser.role === 'admin' ? '(مدير)' : ''}</p>
+                                </div>
+                                <div class="flex items-center gap-2 max-w-xs">
+                                    <span class="text-[10px] text-slate-300">الحفلة:</span>
+                                    <select value={activeShowId} onChange={(e) => setActiveShowId(Number(e.target.value))} class="bg-slate-950 border border-slate-800 p-1.5 rounded-xl text-[11px] text-white max-w-[150px]">
+                                        {shows.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                                    </select>
+                                </div>
+                                <button onClick={() => setCurrentUser(null)} class="bg-red-600/20 text-red-400 border border-red-600/30 px-2.5 py-1 rounded-xl text-[10px]">خروج</button>
+                            </div>
+
+                            <div class="flex flex-wrap gap-1.5 bg-slate-900 p-2 rounded-2xl border border-slate-800 text-[11px]">
+                                {currentUser.permissions.seats && <button onClick={() => setActiveTab('seats')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'seats' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>🎟️ الخريطة</button>}
+                                {currentUser.permissions.reports && <button onClick={() => setActiveTab('reports')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'reports' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>📊 التقارير</button>}
+                                {currentUser.permissions.finances && <button onClick={() => setActiveTab('finances')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'finances' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>💰 المالية</button>}
+                                {currentUser.role === 'developer' && <button onClick={() => setActiveTab('users')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'users' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>👥 إدارة المستخدمين</button>}
+                                {(currentUser.role === 'developer' || currentUser.role === 'admin' || currentUser.permissions.shows) && <button onClick={() => setActiveTab('shows')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'shows' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>🎭 الحفلات</button>}
+                                <button onClick={() => setActiveTab('profile')} class={`px-2.5 py-1.5 rounded-xl font-bold ${activeTab === 'profile' ? 'bg-emerald-600 text-white' : 'text-slate-400'}`}>⚙️ حسابي</button>
+                            </div>
+
+                            <div class="bg-slate-900 p-3 rounded-2xl border border-slate-800">
+                                {activeTab === 'seats' && currentUser.permissions.seats && (
+                                    <div>
+                                        <div class="flex justify-between items-center mb-3">
+                                            <h2 class="text-xs font-bold text-emerald-400">خريطة صالة مسرح راشي الدقيقة (360 كرسي)</h2>
+                                            <div class="flex gap-2 text-[10px]">
+                                                <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-slate-800 border rounded-full"></span> متاح</div>
+                                                <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-emerald-600 rounded-full"></span> حجز</div>
+                                                <div class="flex items-center gap-1"><span class="w-2.5 h-2.5 bg-red-600 rounded-full"></span> بيع</div>
+                                            </div>
+                                        </div>
+
+                                        <div class="w-full max-w-md mx-auto bg-slate-800 border border-emerald-500/40 text-emerald-300 text-center font-bold py-1.5 rounded-xl mb-4 text-xs">
+                                            مسرح راشي (الشاشة بالأمام) 🎭
+                                        </div>
+
+                                        <div class="overflow-x-auto pb-4">
+                                            <div class="inline-flex min-w-[900px] w-full bg-slate-950 p-4 rounded-2xl border border-slate-800 justify-between items-start gap-2">
+                                                
+                                                {/* الجناح الأيمن (247 إلى 299) */}
+                                                <div class="w-44 border border-slate-800 p-2 rounded-xl bg-slate-900/40 text-center flex-shrink-0 space-y-1">
+                                                    <p class="text-[10px] text-emerald-400 font-bold mb-1">الجناح الأيمن</p>
+                                                    {renderRow(range(247, 252))}
+                                                    {renderRow(range(253, 258))}
+                                                    {renderRow(range(259, 264))}
+                                                    {renderRow(range(265, 270))}
+                                                    {renderRow(range(271, 276))}
+                                                    {renderRow(range(277, 282))}
+                                                    {renderRow(range(283, 288))}
+                                                    {renderRow(range(289, 294))}
+                                                    {renderRow(range(295, 299))}
+
+                                                    <div class="pt-3 border-t border-slate-800/80">
+                                                        <p class="text-[9px] text-slate-400 mb-1">خلفي أيمن</p>
+                                                        {renderRow([357, 358, 359, 360])}
+                                                    </div>
+                                                </div>
+
+                                                {/* القطاع الأوسط الرئيسي (1 إلى 246) */}
+                                                <div class="flex-1 border border-slate-800 p-2 rounded-xl bg-slate-900/60 text-center mx-1 space-y-1">
+                                                    <p class="text-[11px] text-emerald-400 font-bold mb-1">القطاع الأوسط (الصالة الرئيسية)</p>
+                                                    {renderRow(range(1, 16))}
+                                                    {renderRow(range(17, 34))}
+                                                    {renderRow(range(35, 54))}
+                                                    {renderRow(range(55, 73))}
+                                                    {renderRow(range(74, 93))}
+                                                    {renderRow(range(94, 112))}
+                                                    {renderRow(range(113, 132))}
+                                                    {renderRow(range(133, 151))}
+                                                    {renderRow(range(152, 170))}
+                                                    {renderRow(range(171, 189))}
+                                                    {renderRow(range(190, 209))}
+                                                    {renderRow(range(210, 229))}
+                                                    {renderRow(range(230, 246))}
+                                                </div>
+
+                                                {/* الجناح الأيسر (304 إلى 356) */}
+                                                <div class="w-44 border border-slate-800 p-2 rounded-xl bg-slate-900/40 text-center flex-shrink-0 space-y-1">
+                                                    <p class="text-[10px] text-emerald-400 font-bold mb-1">الجناح الأيسر</p>
+                                                    {renderRow(range(304, 309))}
+                                                    {renderRow(range(310, 315))}
+                                                    {renderRow(range(316, 321))}
+                                                    {renderRow(range(322, 327))}
+                                                    {renderRow(range(328, 333))}
+                                                    {renderRow(range(334, 339))}
+                                                    {renderRow(range(340, 345))}
+                                                    {renderRow(range(346, 351))}
+                                                    {renderRow(range(352, 356))}
+
+                                                    <div class="pt-3 border-t border-slate-800/80">
+                                                        <p class="text-[9px] text-slate-400 mb-1">خلفي أيسر</p>
+                                                        {renderRow([300, 301, 302, 303])}
+                                                    </div>
+                                                </div>
+
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'reports' && currentUser.permissions.reports && (
+                                    <div class="space-y-4 text-xs">
+                                        <h2 class="text-base font-bold text-emerald-400">📊 تقارير مبيعات وحجوزات التذاكر التفصيلية</h2>
+                                        <div class="space-y-3">
+                                            {users.map(user => {
+                                                const userShowSeats = Object.entries(seatsData[activeShowId] || {}).filter(([_, info]) => info.username === user.username);
+                                                const bookedSeats = userShowSeats.filter(([_, info]) => info.status === 'booked').map(([num]) => num);
+                                                const soldSeats = userShowSeats.filter(([_, info]) => info.status === 'sold').map(([num]) => num);
+
+                                                return (
+                                                    <div key={user.username} class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                                                        <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                                                            <span class="font-bold text-sm text-emerald-300">{user.name} ({user.username})</span>
+                                                            <span class="text-slate-400">إجمالي الحركات: {userShowSeats.length} تذكرة</span>
+                                                        </div>
+                                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                                            <div class="bg-emerald-950/40 p-2.5 rounded-lg border border-emerald-800/40">
+                                                                <p class="font-bold text-emerald-400 mb-1">الحجوزات المؤقتة ({bookedSeats.length}):</p>
+                                                                <p class="text-slate-300 break-words">{bookedSeats.length > 0 ? bookedSeats.join(', ') : 'لا يوجد حجز'}</p>
+                                                            </div>
+                                                            <div class="bg-red-950/40 p-2.5 rounded-lg border border-red-800/40">
+                                                                <p class="font-bold text-red-400 mb-1">المبيعات الكلية ({soldSeats.length}):</p>
+                                                                <p class="text-slate-300 break-words">{soldSeats.length > 0 ? soldSeats.join(', ') : 'لا يوجد بيع'}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'finances' && currentUser.permissions.finances && (
+                                    <div class="space-y-4 text-xs">
+                                        <h2 class="text-base font-bold text-emerald-400">💰 المالية وتتبع حسابات البائعين</h2>
+                                        {users.filter(u => u.role !== 'developer').map(user => {
+                                            const currentShow = shows.find(s => s.id === activeShowId);
+                                            const ticketPrice = currentShow ? currentShow.price : 50;
+
+                                            const userShowSeats = Object.values(seatsData[activeShowId] || {}).filter(info => info.username === user.username);
+                                            const bookedCount = userShowSeats.filter(info => info.status === 'booked').length;
+                                            const soldCount = userShowSeats.filter(info => info.status === 'sold').length;
+
+                                            const bookedValue = bookedCount * ticketPrice;
+                                            const soldValue = soldCount * ticketPrice;
+                                            const totalRequired = soldValue;
+
+                                            const paidAmount = payments[`${activeShowId}_${user.username}`] || 0;
+                                            const remaining = totalRequired - paidAmount;
+
+                                            return (
+                                                <div key={user.username} class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                                    <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+                                                        <span class="font-bold text-sm text-emerald-300">{user.name}</span>
+                                                        <span class="text-slate-400">سعر التذكرة: {ticketPrice} جنيه</span>
+                                                    </div>
+                                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
+                                                        <div class="bg-slate-900 p-2.5 rounded-lg">
+                                                            <p class="text-slate-400">قيم الحجوزات ({bookedCount}):</p>
+                                                            <p class="font-bold text-emerald-400">{bookedValue} جنيه</p>
+                                                        </div>
+                                                        <div class="bg-slate-900 p-2.5 rounded-lg">
+                                                            <p class="text-slate-400">قيمة المبيعات ({soldCount}):</p>
+                                                            <p class="font-bold text-red-400">{soldValue} جنيه</p>
+                                                        </div>
+                                                        <div class="bg-slate-900 p-2.5 rounded-lg">
+                                                            <p class="text-slate-400">المبلغ المسلم:</p>
+                                                            <input type="number" value={paidAmount} onChange={(e) => db.ref(`payments/${activeShowId}_${user.username}`).set(Number(e.target.value))} class="w-full bg-slate-950 border border-slate-800 p-1.5 rounded text-white mt-1" />
+                                                        </div>
+                                                        <div class="bg-slate-900 p-2.5 rounded-lg">
+                                                            <p class="text-slate-400">المتبقي على البائع:</p>
+                                                            <p class="font-bold text-red-400 text-sm">{remaining} جنيه</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
+                                {activeTab === 'users' && currentUser.role === 'developer' && (
+                                    <div class="space-y-3 text-xs">
+                                        <h2 class="text-sm font-bold text-emerald-400">👥 إدارة حسابات المستخدمين والتعديل (المطور فقط)</h2>
+                                        
+                                        <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3">
+                                            <p class="font-bold text-slate-300">{editingUser ? `تعديل حساب: ${editingUser}` : 'إضافة حساب جديد'}</p>
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                                {!editingUser && <input type="text" placeholder="اسم المستخدم (للدخول)" value={newUsername} onChange={e=>setNewUsername(e.target.value)} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />}
+                                                <input type="text" placeholder="الاسم الظاهر بالتطبيق" value={newName} onChange={e=>setNewName(e.target.value)} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />
+                                                <input type="text" placeholder="كلمة المرور" value={newPass} onChange={e=>setNewPass(e.target.value)} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />
+                                            </div>
+
+                                            <div class="flex items-center gap-2 bg-slate-900 p-2 rounded-xl border border-slate-800 max-w-xs">
+                                                <label class="font-bold text-emerald-300 text-[11px]">نوع الحساب:</label>
+                                                <select value={newRole} onChange={e=>setNewRole(e.target.value)} class="bg-slate-950 border border-slate-800 p-1 rounded text-white text-[11px]">
+                                                    <option value="user">بائع عادي (User)</option>
+                                                    <option value="admin">مدير (Admin)</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="bg-slate-900 p-2.5 rounded-xl border border-slate-800 space-y-1.5">
+                                                <p class="font-bold text-emerald-300 text-[11px]">الصلاحيات المفعلة:</p>
+                                                <div class="flex flex-wrap gap-3 text-[11px]">
+                                                    <label class="flex items-center gap-1"><input type="checkbox" checked={newPerms.seats} onChange={e=>setNewPerms({...newPerms, seats: e.target.checked})} /> الخريطة</label>
+                                                    <label class="flex items-center gap-1"><input type="checkbox" checked={newPerms.reports} onChange={e=>setNewPerms({...newPerms, reports: e.target.checked})} /> التقارير</label>
+                                                    <label class="flex items-center gap-1"><input type="checkbox" checked={newPerms.finances} onChange={e=>setNewPerms({...newPerms, finances: e.target.checked})} /> المالية</label>
+                                                    <label class="flex items-center gap-1"><input type="checkbox" checked={newPerms.shows} onChange={e=>setNewPerms({...newPerms, shows: e.target.checked})} /> الحفلات</label>
+                                                </div>
+                                            </div>
+
+                                            {editingUser ? (
+                                                <div class="flex gap-2">
+                                                    <button onClick={saveEditedUser} class="bg-emerald-600 px-3 py-1.5 rounded font-bold">حفظ التعديلات</button>
+                                                    <button onClick={() => { setEditingUser(null); setNewUsername(''); setNewName(''); setNewPass(''); }} class="bg-slate-800 px-3 py-1.5 rounded">إلغاء</button>
+                                                </div>
+                                            ) : (
+                                                <button onClick={() => {
+                                                    if (!newUsername || !newName || !newPass) return alert('املأ البيانات أولاً');
+                                                    db.ref('users').set([...users, { username: newUsername, name: newName, pass: newPass, role: newRole, permissions: newPerms }]);
+                                                    setNewUsername(''); setNewName(''); setNewPass('');
+                                                    alert('تم إضافة الحساب!');
+                                                }} class="bg-emerald-600 px-4 py-1.5 rounded font-bold">إضافة الحساب</button>
+                                            )}
+                                        </div>
+
+                                        <div class="space-y-1.5">
+                                            {users.map(u => (
+                                                <div key={u.username} class="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex justify-between items-center text-[11px]">
+                                                    <div>
+                                                        <span class="font-bold text-white">{u.name}</span>
+                                                        <span class="text-slate-400 mr-2">({u.username}) - [{u.role}]</span>
+                                                    </div>
+                                                    {u.username !== 'developer' ? (
+                                                        <div class="flex gap-3">
+                                                            <button onClick={() => startEditUser(u)} class="text-emerald-400 hover:text-emerald-300 font-bold">تعديل</button>
+                                                            <button onClick={() => {
+                                                                if (confirm('هل أنت متأكد من حذف هذا المستخدم؟')) {
+                                                                    db.ref('users').set(users.filter(x => x.username !== u.username));
+                                                                }
+                                                            }} class="text-red-400 hover:text-red-300">حذف</button>
+                                                        </div>
+                                                    ) : (
+                                                        <span class="text-yellow-400 font-bold">المطور الرئيسي (محمي)</span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'shows' && (currentUser.role === 'developer' || currentUser.role === 'admin' || currentUser.permissions.shows) && (
+                                    <div class="space-y-4 text-xs">
+                                        <h2 class="text-base font-bold text-emerald-400">إدارة الحفلات (إضافة وحذف)</h2>
+                                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                <input type="text" placeholder="اسم الحفلة" value={newShowName} onChange={e=>setNewShowName(e.target.value)} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />
+                                                <input type="date" value={newShowDate} onChange={e=>setNewShowDate(e.target.value)} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />
+                                                <input type="number" placeholder="سعر التذكرة" value={newShowPrice} onChange={e=>setNewShowPrice(Number(e.target.value))} class="bg-slate-900 p-2 rounded border border-slate-800 text-white" />
+                                            </div>
+                                            <button onClick={() => {
+                                                if (!newShowName) return alert('أدخل اسم الحفلة');
+                                                const newId = shows.length ? Math.max(...shows.map(s => s.id)) + 1 : 1;
+                                                db.ref('shows').set([...shows, { id: newId, name: newShowName, date: newShowDate, price: newShowPrice }]);
+                                                setNewShowName('');
+                                                alert('تم إضافة الحفلة!');
+                                            }} class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded font-bold">حفظ الحفلة</button>
+                                        </div>
+
+                                        <div class="space-y-2">
+                                            {shows.map(s => (
+                                                <div key={s.id} class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex justify-between items-center">
+                                                    <div>
+                                                        <span class="font-bold text-white">{s.name}</span>
+                                                        <span class="text-slate-400 mr-2">({s.date}) - السعر: {s.price}ج</span>
+                                                    </div>
+                                                    {shows.length > 1 && (
+                                                        <button onClick={() => {
+                                                            if (confirm('هل أنت متأكد من حذف الحفلة؟')) {
+                                                                db.ref('shows').set(shows.filter(x => x.id !== s.id));
+                                                            }
+                                                        }} class="bg-red-600/20 text-red-400 px-3 py-1 rounded border border-red-600/30">حذف</button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {activeTab === 'profile' && (
+                                    <div class="space-y-4 text-xs">
+                                        <h2 class="text-base font-bold text-emerald-400">حسابي الشخصي</h2>
+                                        <div class="max-w-md bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                                            <div>
+                                                <label class="block mb-1 text-slate-300">اسمك الثابت داخل التطبيق</label>
+                                                <input type="text" value={currentUser.name} disabled class="w-full p-2 bg-slate-900 border border-slate-800 rounded text-slate-500 cursor-not-allowed" />
+                                            </div>
+                                            <div>
+                                                <label class="block mb-1 text-slate-300">تغيير اسم المستخدم (للدخول)</label>
+                                                <input type="text" value={myUsername} onChange={e=>setMyUsername(e.target.value)} class="w-full p-2 bg-slate-900 border border-slate-800 rounded text-white" />
+                                            </div>
+                                            <div>
+                                                <label class="block mb-1 text-slate-300">تغيير كلمة المرور الجديدة</label>
+                                                <input type="text" value={myPass} onChange={e=>setMyPass(e.target.value)} class="w-full p-2 bg-slate-900 border border-slate-800 rounded text-white" />
+                                            </div>
+                                            <button onClick={() => {
+                                                const updatedUsers = users.map(u => u.username === currentUser.username ? { ...u, username: myUsername, pass: myPass } : u);
+                                                db.ref('users').set(updatedUsers);
+                                                setCurrentUser({ ...currentUser, username: myUsername, pass: myPass });
+                                                alert('تم تحديث بيانات الدخول بنجاح!');
+                                            }} class="bg-emerald-600 w-full p-2 rounded font-bold">حفظ تعديلات الدخول</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
