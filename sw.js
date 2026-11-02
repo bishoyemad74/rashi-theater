@@ -1,3 +1,3 @@
 self.addEventListener('fetch', function (event) {
-  // تفعيل عامل الخدمة لتثبيت التطبيق
+  // تفعيل الكاش التشغيلي للتطبيق
 });
